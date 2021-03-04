@@ -167,36 +167,39 @@ public final class PrintSVEvidence extends FeatureWalker<Feature> {
             bciWriter = new Writer<>(outputFilePath, header, bciCodec::encode, compressionLevel);
         } else {
             if ( evidenceClass.equals(DiscordantPairEvidence.class) ) {
-                initializeFOStream(DiscordantPairEvidenceCodec::encode);
+                initializeFOStream(new DiscordantPairEvidenceCodec(), DiscordantPairEvidenceCodec::encode);
             } else if ( evidenceClass.equals(SplitReadEvidence.class) ) {
-                initializeFOStream(SplitReadEvidenceCodec::encode);
+                initializeFOStream(new SplitReadEvidenceCodec(), SplitReadEvidenceCodec::encode);
             } else if ( evidenceClass.equals(BafEvidence.class) ) {
-                initializeFOStream(BafEvidenceCodec::encode);
+                initializeFOStream(new BafEvidenceCodec(), BafEvidenceCodec::encode);
             } else if ( evidenceClass.equals(DepthEvidence.class) ) {
-                initializeFOStream(DepthEvidenceCodec::encode);
+                initializeFOStream(new DepthEvidenceCodec(), DepthEvidenceCodec::encode);
+                writeDepthEvidenceHeader();
             } else {
                 throw new UserException.BadInput("Unsupported evidence type: " + evidenceClass.getSimpleName());
             }
         }
     }
 
-    private <F extends Feature> void initializeFOStream( final Function<F, String> encoder ) {
-        foStream = new FeatureOutputStream<>(outputFilePath, featureCodec, encoder,
+    private <F extends Feature> void initializeFOStream( final FeatureCodec<F, ?> codec,
+                                                         final Function<F, String> encoder ) {
+        foStream = new FeatureOutputStream<>(outputFilePath, codec, encoder,
                 getBestAvailableSequenceDictionary(), compressionLevel);
-        writeHeader();
     }
 
-    private void writeHeader() {
+    private void writeDepthEvidenceHeader() {
         final Object header = getDrivingFeaturesHeader();
-        if (header != null) {
-            if ( header instanceof Header ) {
-                return;
+        if ( header instanceof Header ) {
+            final StringBuilder sb = new StringBuilder("#Chr\tStart\tEnd");
+            final Header hdr = (Header)header;
+            for ( final String sampleName : hdr.getSampleNames() ) {
+                sb.append('\t').append(sampleName);
             }
-            if (header instanceof String) {
-                foStream.writeHeader((String) header);
-            } else {
-                throw new IllegalArgumentException("Expected header object of type " + String.class.getSimpleName());
-            }
+            foStream.writeHeader(sb.toString());
+        } else if (header instanceof String) {
+            foStream.writeHeader((String) header);
+        } else {
+            throw new IllegalArgumentException("Expected header object of type String");
         }
     }
 
