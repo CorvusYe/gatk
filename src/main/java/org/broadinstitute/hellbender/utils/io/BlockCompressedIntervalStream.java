@@ -3,8 +3,8 @@ package org.broadinstitute.hellbender.utils.io;
 import htsjdk.samtools.SAMSequenceDictionary;
 import htsjdk.samtools.SAMSequenceRecord;
 import htsjdk.samtools.seekablestream.SeekableBufferedStream;
-import htsjdk.samtools.seekablestream.SeekablePathStream;
 import htsjdk.samtools.seekablestream.SeekableStream;
+import htsjdk.samtools.seekablestream.SeekableStreamFactory;
 import htsjdk.samtools.util.BlockCompressedInputStream;
 import htsjdk.samtools.util.BlockCompressedOutputStream;
 import htsjdk.samtools.util.BlockCompressedStreamConstants;
@@ -12,6 +12,7 @@ import htsjdk.tribble.CloseableTribbleIterator;
 import htsjdk.tribble.Feature;
 import htsjdk.tribble.FeatureCodec;
 import htsjdk.tribble.FeatureReader;
+import org.broadinstitute.hellbender.engine.FeatureInput;
 import org.broadinstitute.hellbender.engine.GATKPath;
 import org.broadinstitute.hellbender.exceptions.GATKException;
 import org.broadinstitute.hellbender.exceptions.UserException;
@@ -296,7 +297,7 @@ public class BlockCompressedIntervalStream {
     // the only restriction is that you must supply a lambda that reads from a DataInputStream
     //   to reconstitute the object.
     public static final class Reader <T extends Feature> implements FeatureReader<T> {
-        final Path path;
+        final String path;
         final FeatureCodec<T, Reader<T>> codec;
         final long indexFilePointer;
         final BlockCompressedInputStream bcis;
@@ -304,13 +305,14 @@ public class BlockCompressedIntervalStream {
         final Header header;
         final long dataFilePointer;
         IntervalTree<Long> index;
+        boolean usedByIterator;
 
-        public Reader( final Path path, final FeatureCodec<T, Reader<T>> codec ) {
-            this.path = path;
+        public Reader( final FeatureInput<T> inputDescriptor, final FeatureCodec<T, Reader<T>> codec ) {
+            this.path = inputDescriptor.getRawInputString();
             this.codec = codec;
-            final SeekablePathStream sps;
+            final SeekableStream sps;
             try {
-                sps = new SeekablePathStream(path);
+                sps = SeekableStreamFactory.getInstance().getStreamFor(path);
             } catch ( final IOException ioe ) {
                 throw new UserException("unable to open " + path, ioe);
             }
@@ -320,6 +322,7 @@ public class BlockCompressedIntervalStream {
             this.header = readHeader();
             this.dataFilePointer = bcis.getPosition(); // having read header, we're pointing at the data
             this.index = null;
+            this.usedByIterator = false;
             final String expectedClassName = codec.getFeatureType().getSimpleName();
             if ( !header.getClassName().equals(expectedClassName) ) {
                 throw new UserException("can't use " + path + " to read " + expectedClassName +
@@ -333,7 +336,8 @@ public class BlockCompressedIntervalStream {
             this.indexFilePointer = reader.indexFilePointer;
             try {
                 this.bcis = new BlockCompressedInputStream(
-                        new SeekableBufferedStream(new SeekablePathStream(path)));
+                        new SeekableBufferedStream(
+                                SeekableStreamFactory.getInstance().getStreamFor(path)));
             } catch ( final IOException ioe ) {
                 throw new UserException("unable to clone stream for " + path, ioe);
             }
@@ -341,6 +345,7 @@ public class BlockCompressedIntervalStream {
             this.header = reader.header;
             this.dataFilePointer = reader.dataFilePointer;
             this.index = reader.index;
+            this.usedByIterator = true;
         }
 
         public DataInputStream getStream() { return dis; }
@@ -359,15 +364,14 @@ public class BlockCompressedIntervalStream {
                 throws IOException {
             if ( index == null ) {
                 loadIndex(bcis);
-                close();
             }
             final CollatingInterval interval =
                     new CollatingInterval(getDictionary(), chr, start, end);
-            return new OverlapIterator<>(interval, new Reader<>(this));
+            return new OverlapIterator<>(interval, this);
         }
 
         @Override public CloseableTribbleIterator<T> iterator() {
-            return new CompleteIterator<>(new Reader<>(this));
+            return new CompleteIterator<>(this);
         }
 
         @Override public void close() {
@@ -490,16 +494,24 @@ public class BlockCompressedIntervalStream {
             index = intervalTree;
         }
 
+        private Reader<T> getReaderForIterator() {
+            if ( !usedByIterator ) {
+                usedByIterator = true;
+                return this;
+            }
+            return new Reader<>(this);
+        }
+
         private static class CompleteIterator <T extends Feature>
                 implements CloseableTribbleIterator<T> {
             final Reader<T> reader;
             public CompleteIterator( final Reader<T> reader ) {
-                this.reader = reader;
+                this.reader = reader.getReaderForIterator();
                 reader.seekStream(reader.dataFilePointer);
             }
 
             @Override public Iterator<T> iterator() {
-                return new CompleteIterator<>(new Reader<>(reader));
+                return new CompleteIterator<>(reader);
             }
 
             @Override public boolean hasNext() {
@@ -526,7 +538,7 @@ public class BlockCompressedIntervalStream {
 
             public OverlapIterator( final CollatingInterval interval, final Reader<T> reader ) {
                 this.interval = interval;
-                this.reader = reader;
+                this.reader = reader.getReaderForIterator();
                 this.indexEntryIterator = reader.index.overlappers(interval);
                 this.blockStartPosition = -1;
                 advance();
@@ -545,7 +557,7 @@ public class BlockCompressedIntervalStream {
             @Override public void close() { reader.close(); nextT = null; }
 
             @Override public CloseableTribbleIterator<T> iterator() {
-                return new OverlapIterator<>(interval, new Reader<>(reader));
+                return new OverlapIterator<>(interval, reader);
             }
 
             private void advance() {
