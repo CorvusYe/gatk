@@ -681,4 +681,19 @@ public class GenotypeGVCFsIntegrationTest extends CommandLineProgramTest {
             Assert.assertTrue(actualVC.get(n).getAlternateAlleles().stream().anyMatch(a -> a == Allele.SPAN_DEL));
         }
     }
+
+    @Test
+    public void testWithReblockedGVCF() {
+        final File reblockedGVCF = new File("src/test/resources/org/broadinstitute/hellbender/tools/walkers/GenotypeGVCFs/twoReblocked.g.vcf");
+        final File output = createTempFile("reblockedAndGenotyped", ".vcf");
+
+        final ArgumentsBuilder args = new ArgumentsBuilder();
+        args.addReference(b37_reference_20_21)
+                .addVCF(reblockedGVCF)
+                .addOutput(output);
+        runCommandLine(args);
+
+        final List<VariantContext> actualVC = VariantContextTestUtils.getVariantContexts(output);
+        Assert.assertTrue(actualVC.stream().anyMatch(vc -> vc.getGenotype(1).isHomRef() && !vc.getGenotype(1).hasPL()));  //second sample has a bunch of 0/0s
+    }
 }

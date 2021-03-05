@@ -2,12 +2,12 @@ package org.broadinstitute.hellbender.tools.walkers.genotyper.afcalc;
 
 import htsjdk.variant.variantcontext.Allele;
 import htsjdk.variant.variantcontext.Genotype;
+import htsjdk.variant.variantcontext.GenotypeLikelihoods;
 import htsjdk.variant.variantcontext.VariantContext;
 import it.unimi.dsi.fastutil.doubles.DoubleArrayList;
 import it.unimi.dsi.fastutil.ints.Int2ObjectArrayMap;
 import org.apache.commons.math3.special.Gamma;
 import org.apache.commons.math3.util.MathArrays;
-import org.broadinstitute.hellbender.exceptions.GATKException;
 import org.broadinstitute.hellbender.utils.dragstr.DragstrParams;
 import org.broadinstitute.hellbender.tools.walkers.genotyper.GenotypeAlleleCounts;
 import org.broadinstitute.hellbender.tools.walkers.genotyper.GenotypeCalculationArgumentCollection;
@@ -17,7 +17,6 @@ import org.broadinstitute.hellbender.utils.Dirichlet;
 import org.broadinstitute.hellbender.utils.IndexRange;
 import org.broadinstitute.hellbender.utils.MathUtils;
 import org.broadinstitute.hellbender.utils.Utils;
-import org.broadinstitute.hellbender.utils.genotyper.AlleleList;
 
 import java.util.Arrays;
 import java.util.List;
@@ -39,7 +38,8 @@ public final class AlleleFrequencyCalculator {
     private final double indelPseudocount;
     private final int defaultPloidy;
 
-    public AlleleFrequencyCalculator(final double refPseudocount, final double snpPseudocount, final double indelPseudocount, final int defaultPloidy) {
+    public AlleleFrequencyCalculator(final double refPseudocount, final double snpPseudocount,
+                                     final double indelPseudocount, final int defaultPloidy) {
         this.refPseudocount = refPseudocount;
         this.snpPseudocount = snpPseudocount;
         this.indelPseudocount = indelPseudocount;
@@ -68,14 +68,42 @@ public final class AlleleFrequencyCalculator {
         return new AlleleFrequencyCalculator(refPseudoCount, snpPseudoCount, indelPseudoCount, ploidy);
     }
 
+    /**
+     *
+     * @param g must have likelihoods or (if approximateHomRefsFromGQ is true) GQ
+     * @param glCalc
+     * @param log10AlleleFrequencies
+     * @return
+     */
     private static double[] log10NormalizedGenotypePosteriors(final Genotype g, final GenotypeLikelihoodCalculator glCalc, final double[] log10AlleleFrequencies) {
-        final double[] log10Likelihoods = g.getLikelihoods().getAsVector();
+        final double[] log10Likelihoods;
+        if (g.hasLikelihoods()) {
+            log10Likelihoods = g.getLikelihoods().getAsVector();
+        } else if ( g.isHomRef()) {
+            if (g.hasGQ()) {
+                log10Likelihoods = approximateHomRefPLsFromGQ(glCalc.genotypeCount(), g.getGQ(), glCalc);
+            } else {
+                throw new IllegalStateException("Genotype " + g + " does not contain GQ necessary to calculate posteriors.");
+            }
+        } else {
+            throw new IllegalStateException("Genotype " + g + " does not contain likelihoods necessary to calculate posteriors.");
+        }
         final double[] log10Posteriors = new IndexRange(0, glCalc.genotypeCount()).mapToDouble(genotypeIndex -> {
             final GenotypeAlleleCounts gac = glCalc.genotypeAlleleCountsAt(genotypeIndex);
             return gac.log10CombinationCount() + log10Likelihoods[genotypeIndex]
                     + gac.sumOverAlleleIndicesAndCounts((index, count) -> count * log10AlleleFrequencies[index]);
         });
         return MathUtils.normalizeLog10(log10Posteriors);
+    }
+
+    private static double[] approximateHomRefPLsFromGQ(final int genotypeCount, final int gq, final GenotypeLikelihoodCalculator glCalc) {
+        final int[] newPLs = new int[genotypeCount];
+        for (int i = 0; i < genotypeCount; i++) {
+            final GenotypeAlleleCounts gac = glCalc.genotypeAlleleCountsAt(i);
+            final int refCount = gac.alleleCountFor(0);
+                newPLs[i] = (glCalc.ploidy() - refCount) * gq;
+        }
+        return GenotypeLikelihoods.fromPLs(newPLs).getAsVector();
     }
 
     private static int[] genotypeIndicesWithOnlyRefAndSpanDel(final int ploidy, final List<Allele> alleles) {
@@ -140,7 +168,7 @@ public final class AlleleFrequencyCalculator {
         // re-usable buffers of the log10 genotype posteriors of genotypes missing each allele
         final List<DoubleArrayList> log10AbsentPosteriors = IntStream.range(0,numAlleles).mapToObj(n -> new DoubleArrayList()).collect(Collectors.toList());
         for (final Genotype g : vc.getGenotypes()) {
-            if (!g.hasLikelihoods()) {
+            if (!g.hasLikelihoods() && !g.hasGQ() && (g.isHomRef() || g.isNoCall())) {
                 continue;
             }
             final int ploidy = g.getPloidy() == 0 ? defaultPloidy : g.getPloidy();
