@@ -121,7 +121,9 @@ public final class GnarlyGenotyperEngine {
                         if (!stripASAnnotations) {
                             //here we still have the non-ref
                             final Map<String, Object> finalValue = ann.finalizeRawData(vcfBuilder.make(), variant);
-                            finalValue.forEach((key, value) -> annotationsToBeModified.put(key, value));
+                            if (finalValue != null) {
+                                finalValue.forEach((key, value) -> annotationsToBeModified.put(key, value));
+                            }
                             if (annotationDBBuilder != null) {
                                 annotationDBBuilder.attribute(ann.getPrimaryRawKey(), variant.getAttribute(ann.getPrimaryRawKey()));
                             }
@@ -130,14 +132,16 @@ public final class GnarlyGenotyperEngine {
                 }
             }
             catch (final Exception e) {
-                throw new IllegalStateException("Something went wrong: ", e);
+                throw new IllegalStateException("Something went wrong at position " + variant.getContig() + ":" + variant.getStart() + ":", e);
             }
         }
         vcfBuilder.attributes(annotationsToBeModified);
 
         final int variantDP = variant.getAttributeAsInt(GATKVCFConstants.VARIANT_DEPTH_KEY, 0);
-        final double QD = QUALapprox / (double)variantDP;
-        vcfBuilder.attribute(GATKVCFConstants.QUAL_BY_DEPTH_KEY, QD).log10PError(QUALapprox/-10.0-Math.log10(sitePrior));
+        if (variantDP > 0) {
+            final double QD = QUALapprox / (double) variantDP;
+            vcfBuilder.attribute(GATKVCFConstants.QUAL_BY_DEPTH_KEY, QD).log10PError(QUALapprox / -10.0 - Math.log10(sitePrior));
+        }
         if (!keepAllSites) {
             vcfBuilder.rmAttribute(GATKVCFConstants.RAW_QUAL_APPROX_KEY);
         }
