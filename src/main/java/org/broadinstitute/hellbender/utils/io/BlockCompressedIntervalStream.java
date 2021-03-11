@@ -1,5 +1,6 @@
 package org.broadinstitute.hellbender.utils.io;
 
+import com.google.common.annotations.VisibleForTesting;
 import htsjdk.samtools.SAMSequenceDictionary;
 import htsjdk.samtools.SAMSequenceRecord;
 import htsjdk.samtools.seekablestream.SeekableBufferedStream;
@@ -115,7 +116,7 @@ public class BlockCompressedIntervalStream {
     //   to allow you to reconstitute the object when you read it back in later AND you have to
     //   return an CollatingInterval so that we can do indexing.
     public static class Writer <T extends Feature> {
-        final GATKPath path;
+        final String path;
         final SAMSequenceDictionary dict;
         final Map<String, Integer> sampleMap;
         final WriteFunc<T> writeFunc;
@@ -142,13 +143,9 @@ public class BlockCompressedIntervalStream {
                        final Header header,
                        final WriteFunc<T> writeFunc,
                        final int compressionLevel ) {
-            this.path = path;
+            this.path = path.toString();
             this.dict = header.getDictionary();
-            final List<String> sampleNames = header.getSampleNames();
-            this.sampleMap = new HashMap<>(sampleNames.size() * 3 / 2);
-            for ( final String sampleName : sampleNames ) {
-                sampleMap.put(sampleName, sampleMap.size());
-            }
+            this.sampleMap = createSampleMap(header.getSampleNames());
             this.writeFunc = writeFunc;
             this.os = path.getOutputStream();
             this.bcos = new BlockCompressedOutputStream(os, (Path)null, compressionLevel);
@@ -157,6 +154,32 @@ public class BlockCompressedIntervalStream {
             this.indexEntries = new ArrayList<>();
             this.firstBlockMember = true;
             writeHeader(header);
+        }
+
+        @VisibleForTesting
+        public Writer( final String streamSource,
+                final OutputStream os,
+                final Header header,
+                final WriteFunc<T> writeFunc ) {
+            this.path = streamSource;
+            this.dict = header.getDictionary();
+            this.sampleMap = createSampleMap(header.getSampleNames());
+            this.writeFunc = writeFunc;
+            this.os = os;
+            this.bcos = new BlockCompressedOutputStream(os, (Path)null, DEFAULT_COMPRESSION_LEVEL);
+            this.dos = new DataOutputStream(bcos);
+            this.lastInterval = null;
+            this.indexEntries = new ArrayList<>();
+            this.firstBlockMember = true;
+            writeHeader(header);
+        }
+
+        private Map<String, Integer> createSampleMap( final List<String> sampleNames ) {
+            final Map<String, Integer> sampleMap = new HashMap<>(sampleNames.size() * 3 / 2);
+            for ( final String sampleName : sampleNames ) {
+                sampleMap.put(sampleName, sampleMap.size());
+            }
+            return sampleMap;
         }
 
         private void writeHeader( final Header header ) {
@@ -310,14 +333,14 @@ public class BlockCompressedIntervalStream {
         public Reader( final FeatureInput<T> inputDescriptor, final FeatureCodec<T, Reader<T>> codec ) {
             this.path = inputDescriptor.getRawInputString();
             this.codec = codec;
-            final SeekableStream sps;
+            final SeekableStream ss;
             try {
-                sps = SeekableStreamFactory.getInstance().getStreamFor(path);
+                ss = SeekableStreamFactory.getInstance().getStreamFor(path);
             } catch ( final IOException ioe ) {
                 throw new UserException("unable to open " + path, ioe);
             }
-            this.indexFilePointer = findIndexFilePointer(sps);
-            this.bcis = new BlockCompressedInputStream(new SeekableBufferedStream(sps));
+            this.indexFilePointer = findIndexFilePointer(ss);
+            this.bcis = new BlockCompressedInputStream(new SeekableBufferedStream(ss));
             this.dis = new DataInputStream(bcis);
             this.header = readHeader();
             this.dataFilePointer = bcis.getPosition(); // having read header, we're pointing at the data
@@ -346,6 +369,21 @@ public class BlockCompressedIntervalStream {
             this.dataFilePointer = reader.dataFilePointer;
             this.index = reader.index;
             this.usedByIterator = true;
+        }
+
+        @VisibleForTesting
+        public Reader( final String inputStreamName,
+                       final SeekableStream ss,
+                       final FeatureCodec<T, Reader<T>> codec ) {
+            this.path = inputStreamName;
+            this.codec = codec;
+            this.indexFilePointer = findIndexFilePointer(ss);
+            this.bcis = new BlockCompressedInputStream(new SeekableBufferedStream(ss));
+            this.dis = new DataInputStream(bcis);
+            this.header = readHeader();
+            this.dataFilePointer = bcis.getPosition();
+            this.index = null;
+            this.usedByIterator = false;
         }
 
         public DataInputStream getStream() { return dis; }
