@@ -578,18 +578,18 @@ public class CombineGVCFsIntegrationTest extends CommandLineProgramTest {
         Assert.assertTrue(g1.isHet());
         Assert.assertTrue(g1.getAlleles().contains(Allele.create("CAGAGAG")));
 
-        //second variant is 0/0 and ./.
-        variantIndex = 1;
+        //variant is 0/0 and ./.
+        variantIndex = 10;
         g0 = variants.get(variantIndex).getGenotype(0);
         g1 = variants.get(variantIndex).getGenotype(1);
-        Assert.assertTrue(g0.isHomRef());
+        Assert.assertTrue(g0.isNoCall());
         Assert.assertFalse(g0.hasPL());
-        Assert.assertEquals(g0.getGQ(), 60);
-        Assert.assertEquals(g0.getAnyAttribute(VCFConstants.DEPTH_KEY), 93);
-        Assert.assertTrue(g1.isNoCall());
+        Assert.assertFalse(g0.hasGQ());
+        Assert.assertFalse(g0.hasExtendedAttribute(VCFConstants.DEPTH_KEY));
+        Assert.assertTrue(g1.isHomRef());
         Assert.assertFalse(g1.hasPL());
-        Assert.assertFalse(g1.hasGQ());
-        Assert.assertFalse(g1.hasExtendedAttribute(VCFConstants.DEPTH_KEY));
+        Assert.assertEquals(g1.getGQ(), 0);
+        Assert.assertEquals(g1.getAnyAttribute(VCFConstants.DEPTH_KEY), 34);
 
         //third variant is 0/0 and 0/0
         variantIndex = 2;
@@ -597,11 +597,11 @@ public class CombineGVCFsIntegrationTest extends CommandLineProgramTest {
         g1 = variants.get(variantIndex).getGenotype(1);
         Assert.assertTrue(g0.isHomRef());
         Assert.assertFalse(g0.hasPL());
-        Assert.assertEquals(g0.getGQ(), 60);
-        Assert.assertEquals(g0.getAnyAttribute(VCFConstants.DEPTH_KEY), 36);
+        Assert.assertEquals(g0.getGQ(), 50);
+        Assert.assertEquals(g0.getAnyAttribute(VCFConstants.DEPTH_KEY), 35);
         Assert.assertTrue(g1.isHomRef());
         Assert.assertFalse(g1.hasPL());
-        Assert.assertEquals(g1.getGQ(), 60);
+        Assert.assertEquals(g1.getGQ(), 50);
         Assert.assertEquals(g1.getAnyAttribute(VCFConstants.DEPTH_KEY), 38);
 
     }

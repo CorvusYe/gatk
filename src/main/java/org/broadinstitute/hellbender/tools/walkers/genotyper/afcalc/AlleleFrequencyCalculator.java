@@ -168,7 +168,7 @@ public final class AlleleFrequencyCalculator {
         // re-usable buffers of the log10 genotype posteriors of genotypes missing each allele
         final List<DoubleArrayList> log10AbsentPosteriors = IntStream.range(0,numAlleles).mapToObj(n -> new DoubleArrayList()).collect(Collectors.toList());
         for (final Genotype g : vc.getGenotypes()) {
-            if (!g.hasLikelihoods() && !g.hasGQ() && (g.isHomRef() || g.isNoCall())) {
+            if (!g.hasLikelihoods() && !g.hasGQ() && (!g.getAlleles().stream().anyMatch(a -> a.isCalled() && a.isNonReference() && !a.isSymbolic()))) {
                 continue;
             }
             final int ploidy = g.getPloidy() == 0 ? defaultPloidy : g.getPloidy();
