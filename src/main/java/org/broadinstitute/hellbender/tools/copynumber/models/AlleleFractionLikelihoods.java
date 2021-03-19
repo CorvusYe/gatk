@@ -27,7 +27,7 @@ import static org.broadinstitute.hellbender.utils.MathUtils.log10ToLog;
  * We need such functionality because MCMC evaluates the likelihood under proposed parameter changes.
  *
  * <p>
- * if indicator == ALT_MINOR:
+ * if indicator == ALT_MINOR
  * <p>
  * log { [beta^alpha / Gamma(alpha)][(1 - pi) / 2] * int_{0 to infty} f^a * (1 - f)^r * lambda^(alpha + r - 1) * exp(-beta * lambda)/(f + (1 - f) * lambda)^n d lambda }
  * <p>
